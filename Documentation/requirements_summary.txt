@@ -1,0 +1,138 @@
+Written by Koren Bar. course 20465, task 14, 2021b
+
+Hardware:
+
+	Registers: 32 ($0-$31)
+	Reg size: 32bit (4bytes)
+	RAM: 2^25 bytes (0-33,554,431) uint25
+
+	2’s complement
+	Supports ASCII
+
+Command : 32bit (4bytes)
+	Action, Operands...
+
+
+	opcode 	funct 	type 	name 	operands				machine_operation (wil not be implemented in our assembler)
+
+	0 		1 		R 		add		rs,rt,rd				rd=rs+rt
+	0 		2 		R 		sub		rs,rt,rd				rd=rs-rt
+	0 		3 		R 		and		rs,rt,rd				rd=rs&rt
+	0 		4 		R 		or		rs,rt,rd				rd=rs|rt
+	0 		5 		R 		nor		rs,rt,rd				rd=~(rs|rt)
+	1 		1 		R 		move	rd,rs					rd=rs
+	1 		2 		R 		mvhi	rd,rs					rd=(0x00FF&rd)|(0xFF00&rs)
+	1 		3 		R 		mvlo	rd,rs					rd=(0xFF00&rd)|(0x00FF&rs)
+	10 				I 		addi	rs,immed,rt				rt=rs+immed
+	11 				I 		subi	rs,immed,rt				rt=rs-immed
+	12 				I 		andi	rs,immed,rt				rt=rs&immed
+	13 				I 		ori		rs,immed,rt				rt=rs|immed
+	14 				I 		nori	rs,immed,rt				rt=~(rs|immed)
+	15 				I 		bne		rs,rt,label				if rs!=rt: goto label
+	16 				I 		beq		rs,rt,label				if rs=rt: goto label
+	17 				I 		blt		rs,rt,label				if rs<rt: goto label
+	18 				I 		bgt		rs,rt,label				if rs>rt: goto label
+	19 				I 		lb		rs,immed,rt				rt=(rt&~0xFF)|ram[rs+immed] //(byte)
+	20 				I 		sb		rs,immed,rt				ram[rs+immed]=rt&0xFF
+	21 				I 		lw		rs,immed,rt				rt=*(uint32_t*)(ram+rs+immed) // or do it like that: rt=0; for (int i = 0; i < WORD_SIZE; i++) rt |= ram[rs+immed+i] << i*8;
+	22 				I 		sw		rs,immed,rt				*(uint32_t*)(ram+rs+immed)=rt // or do it like that: for (int i = 0; i < WORD_SIZE; i++) ram[rs+immed+i] = rt >> i*8;
+	23 				I 		lh		rs,immed,rt				rt=(rt&0xFFFF0000)|*(uint16_t*)(ram+rs+immed) // or do it like that: for (int i = 0; i < HALF_WORD_SIZE; i++) rt = (rt&~(0xFF<<i*8)) | ram[rs+immed+i] << i*8;
+	24 				I 		sh		rs,immed,rt				*(uint16_t*)(ram+rs+immed)=rt // or do it like that: for (int i = 0; i < HALF_WORD_SIZE; i++) ram[rs+immed+i] = rt >> i*8;
+	30 				J 		jmp		label/reg				reg=is_label, address=reg_num/label_address/0 (don't goto that address, the machine will do that)
+	31 				J 		la		label					reg=0, address=label_address/0(if not exists in the current file), $0=address (what if address==0)
+	32 				J 		call	label					%0=next_cmd_address, reg=0, address=label_address/0, if address: goto address
+	63 				J 		stop							address=0, reg=0
+	
+	Types:
+		R:
+			unused(0-5),funct(6-10),rd(11-15),rt(16-20),rs(21-25),opcode(26-31)
+		I:
+			immed(0-15),rt(16-20),rs(21-25),opcode(26-31)
+		J:
+			address(0-24),reg(25),opcode(26-31)
+			
+	REG_SIZE		4 bytes
+	WORD_SIZE 		4 bytes
+	HALF_WORD_SIZE 	2 bytes
+
+	MAX_LINE_LEN 	80 // not including '\n'
+	MAX_LABEL_LEN 	31
+	
+	Assembly File:
+		- a single statement is a line (statement=line)
+		- could be additional spaces of any type (use isspace)
+		- max line length is 81 (80 + \n)
+		
+		Labels:
+			- starts with a letter (A/a/B/b/...)
+			- contains only letters and numbers
+			- max length is 31
+			- ':' right after the label name (without spaces at all)
+			- can't be set twice on the same file, also not after declaring with .extern
+			- can't be a command name or directive name
+		
+		Statements Types:
+			- empty 		- only spaces (ignoring)
+			- comment 		- the first non-space char is ';' (ignoring)
+			- command 		- a command that will be encoded to binary code
+				- command name must be lower case (if not, print error)
+				- if there is a label it will be added to the symbol table and will be set to the first byte of that command in the result binary code
+				- some commands contains registers in their params that way: $9 (reg no. 9) or $0 (reg no. 0)
+				- commands table appears above
+			- directive 	- a command for the assembler that will not be encoded
+				- directive name start with '.' and must be lower case (if not, print error)
+				- where label is relevant it will be set to the fisrt written byte, if label is not relevant but written, print warning
+				.db x,...			- write each param to the data image as byte							- labelable
+				.dw x,...			- write each param to the data image as word (4 bytes)					- labelable
+				.dh	x,...			- write each param to the data image as half word (2 bytes)				- labelable
+				.asciz "free text"	- write each ascii char to the data image as byte + \0					- labelable
+				.entry LABEL		- declare a label on the current file for use by external files	 		- no label
+				.extern LABEL		- declare a label from an external file for use on the current file		- no label
+									DON'T USE BOTH .entry AND .extern FOR THE SAME LABEL ON THE SAME FILE!
+			
+		Numbers:
+			- 10 based only
+			- +123, -5, 76 are valid numbers
+			- integers only, 12.3 is invalid number
+			
+	Data Variables:
+		- byte *code // the decoded instruction commands 	(init after the first file reading)
+		- byte *data // memory for directive commands 		(init after the first file reading)
+		- unsigned long ic // instruction counter, position in the code array (>=100)
+		- unsigned long dc // data counter, position in the data array (>=0)
+		- symbol_t *symbol_table // list of found labels (do a first reading over the file to fill it before encoding)
+			
+	Structs:
+		- symbol_t:
+			- name
+			- pos (IC/DC before adding the directive data)
+			- memory* (data or code)
+			- is_external
+			
+	Possible Errors and Warnings: (line number will be written for any error (>=1))
+		- Label must start with a letter
+		- Statement is too long (>MAX_LINE_LEN)
+		- Lebel is too long
+		- Invalid command name "aDD"
+		- Unknown command name "DW", did you mean to the directive name ".dw"?
+		- Unknown command name "notexists"
+		- Invalid directive name ".DW"
+		- Unknown directive name ".ne"
+		- Missing parameters
+		- Unnecessary comma
+		- Too many parameters
+		- Missing comma	(some *register* param contains space)
+		- Invalid register "$ 3" (isregstr, isinteger)
+		- Invalid register "$34" (or "$-1")
+		- Invalid parameter "-+97d"
+		- Label "%s" already exists in line %ld
+		- Label "%s" was not found
+		- Invalid numeric parameter "9.2-"
+		- Non-integer parameter "-9.2"
+		- Integer parameter is too big
+		- String parameter must be written between ""
+		- Invalid string parameter "m􀂫tex􀂫", string must contains printable ascii chareters only. (use isprint for that)
+		- Out of memory (which memo?)
+		
+		
+		

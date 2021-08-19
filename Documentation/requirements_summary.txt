@@ -13,7 +13,7 @@ Command : 32bit (4bytes)
 	Action, Operands...
 
 
-	opcode 	funct 	type 	name 	operands				machine_operation (wil not be implemented in our assembler)
+	opcode 	funct 	type 	name 	operands				machine_operation (will not be implemented in our assembler)
 
 	0 		1 		R 		add		rs,rt,rd				rd=rs+rt
 	0 		2 		R 		sub		rs,rt,rd				rd=rs-rt
@@ -38,7 +38,7 @@ Command : 32bit (4bytes)
 	22 				I 		sw		rs,immed,rt				*(uint32_t*)(ram+rs+immed)=rt // or do it like that: for (int i = 0; i < WORD_SIZE; i++) ram[rs+immed+i] = rt >> i*8;
 	23 				I 		lh		rs,immed,rt				rt=(rt&0xFFFF0000)|*(uint16_t*)(ram+rs+immed) // or do it like that: for (int i = 0; i < HALF_WORD_SIZE; i++) rt = (rt&~(0xFF<<i*8)) | ram[rs+immed+i] << i*8;
 	24 				I 		sh		rs,immed,rt				*(uint16_t*)(ram+rs+immed)=rt // or do it like that: for (int i = 0; i < HALF_WORD_SIZE; i++) ram[rs+immed+i] = rt >> i*8;
-	30 				J 		jmp		label/reg				reg=is_label, address=reg_num/label_address/0 (don't goto that address, the machine will do that)
+	30 				J 		jmp		label/reg				reg=isregister, address=reg_num/label_address/0 (don't goto that address, the machine will do that)
 	31 				J 		la		label					reg=0, address=label_address/0(if not exists in the current file), $0=address (what if address==0)
 	32 				J 		call	label					%0=next_cmd_address, reg=0, address=label_address/0, if address: goto address
 	63 				J 		stop							address=0, reg=0
@@ -58,81 +58,107 @@ Command : 32bit (4bytes)
 	MAX_LINE_LEN 	80 // not including '\n'
 	MAX_LABEL_LEN 	31
 	
-	Assembly File:
-		- a single statement is a line (statement=line)
-		- could be additional spaces of any type (use isspace)
-		- max line length is 81 (80 + \n)
+Assembly File:
+	- a single statement is a line (statement=line)
+	- could be additional spaces of any type (use isspace)
+	- max line length is 81 (80 + \n)
+	- if an error occurs, don't create output files.
+
+	Labels:
+		- starts with a letter (A/a/B/b/...)
+		- contains only letters and numbers
+		- max length is 31
+		- ':' right after the label name (without spaces at all)
+		- can't be set twice on the same file, also not after declaring with .extern
+		- can't be a statement name or directive name
+	
+	Statements Types:
+		- empty 		- only spaces (ignore)
+		- comment 		- the first non-space char is ';' (ignore)
+		- command 		- a statement that will be encoded to binary code
+			- statement name must be lower case (if not, print error)
+			- if there is a label it will be added to the symbol table and will be set to the first byte of that statement in the result binary code
+			- some commands contains registers in their params that way: $9 (reg no. 9) or $0 (reg no. 0)
+			- commands table appears above
+		- directive 	- a statement for the assembler that will not be encoded
+			- directive name start with '.' and must be lower case (if not, print error)
+			- where label is relevant it will be set to the fisrt written byte, if label is not relevant but written, print warning
+			.db x,...			- write each param to the data image as byte							- labelable
+			.dw x,...			- write each param to the data image as word (4 bytes)					- labelable
+			.dh	x,...			- write each param to the data image as half word (2 bytes)				- labelable
+			.asciz "free text"	- write each ascii char to the data image as byte + \0					- labelable
+			.entry LABEL		- declare a label on the current file for use by external files	 		- no label
+			.extern LABEL		- declare a label from an external file for use on the current file		- no label
+								DON'T USE BOTH .entry AND .extern FOR THE SAME LABEL ON THE SAME FILE!
 		
-		Labels:
-			- starts with a letter (A/a/B/b/...)
-			- contains only letters and numbers
-			- max length is 31
-			- ':' right after the label name (without spaces at all)
-			- can't be set twice on the same file, also not after declaring with .extern
-			- can't be a command name or directive name
-		
-		Statements Types:
-			- empty 		- only spaces (ignoring)
-			- comment 		- the first non-space char is ';' (ignoring)
-			- command 		- a command that will be encoded to binary code
-				- command name must be lower case (if not, print error)
-				- if there is a label it will be added to the symbol table and will be set to the first byte of that command in the result binary code
-				- some commands contains registers in their params that way: $9 (reg no. 9) or $0 (reg no. 0)
-				- commands table appears above
-			- directive 	- a command for the assembler that will not be encoded
-				- directive name start with '.' and must be lower case (if not, print error)
-				- where label is relevant it will be set to the fisrt written byte, if label is not relevant but written, print warning
-				.db x,...			- write each param to the data image as byte							- labelable
-				.dw x,...			- write each param to the data image as word (4 bytes)					- labelable
-				.dh	x,...			- write each param to the data image as half word (2 bytes)				- labelable
-				.asciz "free text"	- write each ascii char to the data image as byte + \0					- labelable
-				.entry LABEL		- declare a label on the current file for use by external files	 		- no label
-				.extern LABEL		- declare a label from an external file for use on the current file		- no label
-									DON'T USE BOTH .entry AND .extern FOR THE SAME LABEL ON THE SAME FILE!
-			
-		Numbers:
-			- 10 based only
-			- +123, -5, 76 are valid numbers
-			- integers only, 12.3 is invalid number
-			
-	Data Variables:
-		- byte *code // the decoded instruction commands 	(init after the first file reading)
-		- byte *data // memory for directive commands 		(init after the first file reading)
-		- unsigned long ic // instruction counter, position in the code array (>=100)
-		- unsigned long dc // data counter, position in the data array (>=0)
-		- symbol_t *symbol_table // list of found labels (do a first reading over the file to fill it before encoding)
-			
-	Structs:
-		- symbol_t:
-			- name
-			- pos (IC/DC before adding the directive data)
-			- memory* (data or code)
-			- is_external
-			
-	Possible Errors and Warnings: (line number will be written for any error (>=1))
-		- Label must start with a letter
-		- Statement is too long (>MAX_LINE_LEN)
-		- Lebel is too long
-		- Invalid command name "aDD"
-		- Unknown command name "DW", did you mean to the directive name ".dw"?
-		- Unknown command name "notexists"
-		- Invalid directive name ".DW"
-		- Unknown directive name ".ne"
-		- Missing parameters
-		- Unnecessary comma
-		- Too many parameters
-		- Missing comma	(some *register* param contains space)
-		- Invalid register "$ 3" (isregstr, isinteger)
-		- Invalid register "$34" (or "$-1")
-		- Invalid parameter "-+97d"
-		- Label "%s" already exists in line %ld
-		- Label "%s" was not found
-		- Invalid numeric parameter "9.2-"
-		- Non-integer parameter "-9.2"
-		- Integer parameter is too big
-		- String parameter must be written between ""
-		- Invalid string parameter "m􀂫tex􀂫", string must contains printable ascii chareters only. (use isprint for that)
-		- Out of memory (which memo?)
-		
-		
-		
+	Numbers:
+		- 10 based only
+		- +123, -5, 76 are valid numbers
+		- integers only, 12.3 is invalid number
+
+Data Variables: (tip: all of these will be placed in an encoder class)
+	- byte *code // the decoded instruction commands, max size is the RAM size (2^25 bytes) 	(init after the first file reading, cuz u will know how much memory u will need)
+	- byte *data // memory for directive commands 												(init after the first file reading)
+	- unsigned long ic // instruction counter, position in the code array (>=100)
+	- unsigned long dc // data counter, position in the data array (>=0)
+	- symbol_t *symbol_table // list of found labels (do a first reading over the file to fill it before encoding)
+	
+Structs:
+	- symbol_t:
+		- name
+		- pos (IC/DC before adding the directive data)
+		- memory* (data or code)
+		- is_external
+
+Output Files:
+	.ob file:
+		- first line is 2 decimal numbers, the first is code size and the second is data size. example: "     52 177" (just the first line)
+		- an HEX text file (not binary)
+		- each line starts with 4 digits of the address in the code (the first byte index)
+		- example line: "0104 FB FF 22 35" 
+	.ent file:
+		- each line is an entry label with its value
+		- example line: "Next 0116" or "HELLO 0161"
+	.ext file:
+		- same as .ent file but for extern labels
+
+
+Possible Errors and Warnings: (line number will be written for any error (>=1))
+	X Invalid source file "fl"
+	X Invalid source file "fl.java"
+	X Failed to open assembly source file "filename.as"
+
+	X Label must start with a letter
+	X Statement is too long (>MAX_LINE_LEN)
+	X Lebel is too long
+	X Invalid statement name "aDD"
+	X Unknown statement name "DW", did you mean to the directive name ".dw"?
+	X Unknown statement name "notexists"
+	X Invalid directive name ".DW"
+	X Unknown directive name ".ne"
+	
+	X Missing parameters
+	X Illegal comma
+	X Too many parameters
+	
+	X Invalid register "$ 3" (isregstr, isinteger)
+	X Invalid register "$34" (or "$-1")
+	X Invalid parameter "-+97d"
+	
+	X Label is too long
+	X Label can't be a command name "name"
+	- Label can't be a directive name "name" (label can't start with '.' anyway so ignore that error)
+	
+	X Label defined as entry but was not found in the current file.
+	
+	X Label "%s" already exists (in line %ld)
+	X Label "%s" was not found (could be occurred only after the first verification phase)
+	X Can't use an extern label in '%s' command.
+	
+	X Invalid numeric parameter "9.2-"
+	X Non-integer parameter "-9.2"
+	X Integer parameter is too big
+	X Integer parameter is too small
+	X String parameter must be written between ""
+	X Invalid string parameter "m􀂫tex􀂫", string must contains printable ascii chareters only. (use isprint for that)
+	
